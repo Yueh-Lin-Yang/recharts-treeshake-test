@@ -40,7 +40,7 @@ npm run build
 | 01 CommonJS export | `experiment/01a-commonjs-single-file`<br>`experiment/01b-commonjs-aggregator` | CJS `module.exports = {...}` 是動態物件，bundler 無法靜態分析 → `unuse` 全洩漏 | `experiment/esm-named-import` | 改用 ESM `export function` + `import { use }` |
 | 02 ESM default object | `experiment/02-esm-default-export` | `export default { use, unuse }` 仍是動態物件 → `unuse` 洩漏 | `experiment/esm-named-import` | 改用 named export，不是 default 包成物件 |
 | 03 動態 key 存取 | `experiment/03a-esm-dynamic-key-variable`<br>`experiment/03b-esm-dynamic-key-runtime` | `api[m]()` 任何 key 變數化 → 所有 key 都得保留 | `experiment/esm-namespace-import` | 寫死 `api.use()` 讓 key 靜態可讀 |
-| 04 Side effect 拖走 export | `experiment/04-esm-side-effect-keeps-unused` | 模組頂層執行語句引用 unused export → 連 secret 一起洩漏 | `experiment/esm-named-import` | 模組頂層只放純宣告 |
+| 04 Side effect 拖走 export | `experiment/04-esm-side-effect-keeps-unused` | 模組頂層執行語句引用 unused export → 連 secret 一起洩漏 | `experiment/04-solution-split-side-effect`<br>`experiment/04-solution-split-per-function` | 拆檔——把 side effect 集中到專屬模組，或一檔一函式按邊界切 |
 | 05 CJS 套件 lodash | `experiment/05a-lodash-default-import`<br>`experiment/05b-lodash-named-import` | `lodash` 是 CJS，267 kB 整包進 bundle，換寫法救不了 | `experiment/05-solution-lodash-es-named-import` | 改用 `lodash-es`（ESM 重新打包），195 kB |
 | 06 Schema 寫同一檔 | `experiment/06-zod-all-in-one-file` | `z.object({...})` 在頂層被視為 side effect → 6 個 schema 全洩漏 | `experiment/06-solution-zod-one-file-per-schema` | 一檔一 schema，bundler 從檔案邊界精準切割 |
 | 07 依賴鏈幻覺 | `experiment/07-dependency-chain-illusion` | 只 import `LineChart + Line + Tooltip`，bundle 卻出現 `Rectangle` / `Cross` → 誤判 tree-shake 失敗 | （無解法，是認知陷阱） | tree-shake 正常，是 `Tooltip → Cursor → Rectangle/Cross` 依賴鏈拉的 |
@@ -203,7 +203,22 @@ import { use } from './api';  // App 只用 use
 
 > 📌 **資安結論**：bundler 沒有「機密」概念。任何放在 client 端的常數——API key、JWT secret、第三方 service token——只要有任何一條 reference 鏈從可達區（reachable code）通到它，就會以**明文**進 bundle。minify 不會加密字串，只會混淆變數名。**不要把 secret 放在 client 程式碼裡，就這樣。**
 
-> ✅ **解法分支**：[`experiment/esm-named-import`](#解法樣板--esm-named-export後面所有解法都長這樣) — 模組頂層**只能放純宣告**（`export function`、`export const = 純運算值`），不要在頂層執行語句。回到解法樣板的乾淨狀態，side effect 自然不會把 unused export 拖回來。
+#### 解法：拆檔
+
+真實世界裡「模組頂層完全不放 side effect」不切實際——logger init、polyfill、metric register、有些 framework 的 module-level 註冊都會被歸類成 side effect。**真正的解法是拆檔**：讓 consumer 只 import 純宣告檔，不碰有 side effect 的檔。
+
+兩種拆法都能解掉問題，差別在於組織風格：
+
+| 解法分支 | 拆法 | 適用情境 |
+|---|---|---|
+| [`experiment/04-solution-split-side-effect`](#) | `api.ts`（純 export `use` + `unuse`）+ `api-init.ts`（頂層 `console.log({ use, unuse })`） | 共用模組想保留多個 exports；init 由 entry（`main.tsx`）顯式 import 一次觸發 |
+| [`experiment/04-solution-split-per-function`](#) | `api/use.ts`（純 `use`）+ `api/unuse.ts`（`unuse` + secret + side effect 全在這） | 一檔一函式，跟實驗 06（zod）「一檔一 schema」同一個原理 |
+
+**為什麼兩種都成立**：bundler 對「整個檔案」做包含/排除的判斷比「檔案內某段程式碼」可靠得多。只要 consumer 沒 import 那個檔，bundler 就敢整檔不收。**模組邊界 = bundler 信得過的剃刀。**
+
+實測結果（兩種解法都通過）：bundle 裡 `UNUSE_METHOD_MARKER` 與 `SECRET_MARKER` 消失，secret 不再明文進 bundle。對照組（問題分支）兩個 marker 都還在。
+
+> 📌 **跟實驗 06 的關係**：實驗 06（zod 拆 schema）是同一招的另一個應用。共通結論——**當你發現某個 unused export 救不下來，第一個想到的應該是「能不能把它移到自己的檔」**。
 
 ### 實驗 05 — 真實套件 lodash：套件本身是 CJS 還是 ESM 決定一切
 
