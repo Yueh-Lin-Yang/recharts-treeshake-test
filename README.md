@@ -43,6 +43,7 @@ npm run build
 | 05 Side effect 拖走 export | `experiment/05-esm-side-effect-keeps-unused` | 模組頂層執行語句引用 unused export → 連 secret 一起洩漏 | `experiment/03a-esm-named-import` | 模組頂層只放純宣告 |
 | 06 CJS 套件 lodash | `experiment/06a-lodash-default-import`<br>`experiment/06b-lodash-named-import` | `lodash` 是 CJS，267 kB 整包進 bundle，換寫法救不了 | `experiment/06c-lodash-es-named-import` | 改用 `lodash-es`（ESM 重新打包），195 kB |
 | 07 Schema 寫同一檔 | `experiment/07-zod-all-in-one-file` | `z.object({...})` 在頂層被視為 side effect → 6 個 schema 全洩漏 | `experiment/07-solution-zod-one-file-per-schema` | 一檔一 schema，bundler 從檔案邊界精準切割 |
+| 08 依賴鏈幻覺 | `experiment/08-dependency-chain-illusion` | 只 import `LineChart + Line + Tooltip`，bundle 卻出現 `Rectangle` / `Cross` → 誤判 tree-shake 失敗 | （無解法，是認知陷阱） | tree-shake 正常，是 `Tooltip → Cursor → Rectangle/Cross` 依賴鏈拉的 |
 
 ---
 
@@ -308,6 +309,23 @@ import { UserSchema } from '@/schemas/user';  // 直接指到那個檔案
 > 📌 **結論**：tree-shake 的單位是**模組（檔案）**，不是 `export`。同個檔案內有任何函式呼叫，整個檔案的所有 export 都會綁在一起。Schema、constants、配置、style tokens——當你把它們塞同一檔，就等於放棄了 tree-shake 的機會。
 
 > ✅ **解法分支**：[`experiment/07-solution-zod-one-file-per-schema`](#實驗-07--zod即使是-esm-套件把-schema-全塞同一檔案也會洩漏) — 一檔一 schema，bundler 從檔案邊界精準切割。
+
+### 實驗 08 — 依賴鏈幻覺：看到陌生模組 ≠ tree-shake 失敗
+
+**背景**：前面 01–07 都是「真的失敗」。實驗 08 反過來，講一個**容易誤判的場景**——你看到 bundle report 出現 `Rectangle.js`、`Cross.js`，但你的程式碼裡明明只寫了 `<LineChart>` + `<Line>` + `<Tooltip>`，沒寫過 `<Bar>` 或 `Cross`。直覺反應：「tree-shake 是不是壞了？」
+
+**真相**：tree-shake 正常運作。`Tooltip` 內部用了 `Cursor`，而 `Cursor` 為了支援不同圖表類型的 hover 樣式，頂層靜態 import 了 `Curve`、`Cross`、`Rectangle`、`Sector` 四種形狀——這條依賴鏈從你看不到的地方把它們拉進來。
+
+**判斷準則：對照組測試**
+- 拿掉一個你「有用」的 import（例如 `<Tooltip>`），重 build
+- 如果 bundle 變小、那些陌生模組減少 → tree-shake 在工作，它們只是依賴鏈拖進來的
+- 如果 bundle 完全不變 → 才是真的 tree-shake 失敗（回去找實驗 01–07 的形狀）
+
+本實驗實測：移除 `<Tooltip>` 後 bundle 從 510 kB → 481 kB（−28 kB），證實依賴鏈是真實的。
+
+> 📌 **完整依賴圖與證據**：見 [DEPENDENCY_CHAIN.md](./DEPENDENCY_CHAIN.md)（含 `Tooltip → Cursor → Rectangle/Cross` 與 `LineChart → CartesianChart` 兩條鏈的原始碼追蹤）。
+
+> 📌 **跟實驗 04 的鏡像關係**：實驗 04 是「你寫動態 key，bundler 無法靜態分析」；實驗 08 是「套件內部的 runtime 分支，bundler 也無法靜態分析」。同一個原理的兩面。
 
 ---
 
