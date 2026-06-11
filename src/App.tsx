@@ -1,10 +1,10 @@
+import { use } from '@/lib/api';
+
 export function App() {
   return (
     <div style={{ padding: 24 }}>
-      <h1>Tree-shaking Playground</h1>
-      <p>
-        切換到 <code>experiment/*</code> branch 查看各個實驗。
-      </p>
+      <h1>實驗 05 — side effect 引用 unused export，破壞 tree-shake</h1>
+      <p>{use()}</p>
     </div>
   );
 }
