@@ -1,46 +1,37 @@
-// 模組頂層 side effect：把所有方法註冊到 global registry。
-// 這一行在 import 時必跑，且引用了 unuse，因此 unuse 實作會被保留。
-// (globalThis as Record<string, unknown>).__methodRegistry = { use, unuse };
+/*
+ * From the bundler's point of view —— 以下這些都算 side effect:
+ *
+ *   - Affects browser state, e.g. console.log / localStorage / history
+ *   - fetch / XMLHttpRequest
+ *   - DOM interaction
+ *   - Affects the Event Loop, e.g. setTimeout / setInterval / Promise / queueMicrotask
+ *   - ~~JSON.parse~~ / JSON.stringify (may throw an error)
+ *   - throw / any API that can throw
+ *   - Object.assign
+ *
+ * 只要模組頂層出現以上任何一種，bundler 都會保守地保留整個模組，
+ * 連 unused export（例如下面的 unuse）也一起被保留。
+ *
+ * 取消下面任一行的註解 rebuild，就能看到 UNUSE_METHOD_MARKER 重新出現在 bundle 裡。
+ */
 
-// 其他常見會破壞 tree-shake 的模組頂層 side effect（任選一種就有同樣效果）：
-
-// 1. console.log / 模組層級日誌
-// console.log('[api] module loaded', { use, unuse });
-
-// 2. 設定全域變數（window / globalThis）
-// (window as any).__api = { use, unuse };
-
-// 3. 改動內建 prototype（polyfill 的常見寫法）
-// Array.prototype.toUseString = function () { return use(); };
-
-// 4. import CSS / 靜態資源（純粹為了引發副作用）
-// import './api.css';
-
-// 5. 模組頂層 new 一個物件（例如建立 EventEmitter、Subject、Map cache）
-// const _cache = new Map<string, Function>();
-// _cache.set('use', use);
-// _cache.set('unuse', unuse);
-
-// 6. 模組頂層立即呼叫工廠函式（無 /*#__PURE__*/ 標註）
-// const _registered = registerAll({ use, unuse });
-
-// 7. 第三方 SDK 模組頂層 init（例：analytics、Sentry）
-// analytics.register('use', use);
-// analytics.register('unuse', unuse);
-
-// 8. 模組頂層執行 IIFE
-// (() => { Object.assign(globalThis, { use, unuse }); })();
+console.log('[api] module loaded', { use, unuse });
+// (window as unknown as Record<string, unknown>).__api = { use, unuse };
+// document.title = 'api-loaded';
+// setTimeout(() => unuse(), 0);
+// JSON.stringify({ use, unuse });
+// if (!unuse) throw new Error('boom');
+// Object.assign(globalThis, { use, unuse });
 
 export function use() {
-  return `USE_METHOD_MARKER — 我會用到 secretKey: ${secertKey}`;
+  return 'USE_METHOD_MARKER — App 真的會用到的方法';
 }
 
-// ⚠️ 資安陷阱：模組頂層常數即使「看起來只給 use 用」，
-// 只要這個模組被任何地方 import，這個字串就會原封不動進 bundle，
-// 公開 source map / 直接 view source 都能看到。
-// 真實世界例子：API key、JWT secret、第三方 service token 被誤放在 client 端模組。
-const secertKey = 'SECRET_MARKER_sk-live-1234567890abcdef';
+// ⚠️ 資安陷阱：secret 即使只被「沒人用的 unuse」引用，
+// 只要某個 side effect 把 unuse 拉進 bundle，secret 就會跟著被打包進去。
+// 真實世界例子：feature flag、debug helper、舊版相容函式裡藏著的 API key / JWT secret。
+const secretKey = 'SECRET_MARKER_sk-live-1234567890abcdef';
 
 export function unuse() {
-  return 'UNUSE_METHOD_MARKER — App 不會用到，但模組頂層 side effect 引用了它，bundler 不敢丟';
+  return `UNUSE_METHOD_MARKER — App 不會用到，但用了 secretKey: ${secretKey}`;
 }
