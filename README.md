@@ -45,6 +45,9 @@ npm run build
 | `experiment/04a-esm-dynamic-key-variable` | 用變數當 method name：`const m = 'use'; api[m]()` | `unuse` 仍進 bundle |
 | `experiment/04b-esm-dynamic-key-runtime` | runtime 三元決定 method name：`api[cond ? 'use' : 'unuse']()` | `unuse` 仍進 bundle |
 | `experiment/05-esm-side-effect-keeps-unused` | 模組頂層常數（如 secret）與 8 種常見 side effect 寫法 | secret 明文進 bundle，side effect 寫法會保留 unused export |
+| `experiment/06a-lodash-default-import` | 真實套件 lodash：`import _ from 'lodash'`，只用 `debounce` | 267 kB（整包進 bundle） |
+| `experiment/06b-lodash-named-import` | 同 lodash 但改 `import { debounce } from 'lodash'` | **仍 267 kB**（CJS 無解） |
+| `experiment/06c-lodash-es-named-import` | 改用 `lodash-es`（ESM 版）+ named import | **195 kB**（省 71 kB） |
 
 ---
 
@@ -213,6 +216,51 @@ import { use } from './api';  // App 只用 use
 > 📌 **資安結論**：bundler 沒有「機密」概念。任何放在 client 端的常數——API key、JWT secret、第三方 service token——只要有任何一條 reference 鏈從可達區（reachable code）通到它，就會以**明文**進 bundle。minify 不會加密字串，只會混淆變數名。**不要把 secret 放在 client 程式碼裡，就這樣。**
 
 > 📌 **tree-shake 結論**：模組頂層**只能放純宣告**（`export function`、`export const = 純運算值`）。任何「執行語句」——尤其上面這幾類——都會讓 bundler 變保守。
+
+### 實驗 06 — 真實套件 lodash：套件本身是 CJS 還是 ESM 決定一切
+
+**背景**：實驗 01–05 都是我們自己寫的小例子。實驗 06 換成真實世界最知名的工具庫 **lodash**，看看「我只用一個 `debounce`」這個簡單需求，bundle 會差多少。
+
+對照組（baseline 沒 lodash）約 **193 kB**。
+
+#### 06a — `import _ from 'lodash'`
+
+```ts
+import _ from 'lodash';
+_.debounce(...);
+```
+
+Bundle: **267 kB**。整包 lodash 進來——`cloneDeep`、`throttle`、`isEqual`、`groupBy`… 全部都在，雖然只用了 `debounce`。
+
+#### 06b — 改成 named import，能救嗎？
+
+```ts
+import { debounce } from 'lodash';
+debounce(...);
+```
+
+Bundle: **267 kB**——**幾乎一模一樣**。為什麼？因為 npm 上的 `lodash` 套件**仍然是 CJS 格式**（`module.exports = ...`）。這就是實驗 01 的真實版本：CJS 沒辦法 tree-shake，**換寫法救不了**。
+
+#### 06c — 改用 `lodash-es`（ESM 版）
+
+```ts
+import { debounce } from 'lodash-es';
+debounce(...);
+```
+
+Bundle: **195 kB**——只多了 ~2.5 kB（就是 `debounce` 本身的程式碼）。
+
+**`lodash-es`** 是 lodash 官方提供的 **ESM 重新打包版本**，每個函式都是獨立的 ESM 模組，bundler 能精準剃掉沒用到的。
+
+| 寫法 | Bundle | 增加 |
+|---|---|---|
+| 06a `import _ from 'lodash'` | 267 kB | +74 kB |
+| 06b `import { debounce } from 'lodash'` | 267 kB | +74 kB |
+| 06c `import { debounce } from 'lodash-es'` | 195 kB | **+2.5 kB** |
+
+> 📌 **結論**：tree-shake 友善度不只取決於**你怎麼寫 import**，更取決於**這個套件本身是怎麼打包出來的**（CJS / ESM / 兩者都有）。挑套件時值得多看一眼：package.json 裡有沒有 `"module"` 或 `"exports"` 欄位指向 ESM 版本？沒有的話，再聰明的 import 寫法都救不回來。
+
+> 📌 **lodash 實務建議**：用 `lodash-es` 而不是 `lodash`。或更激進——換到沒有 CJS 包袱的現代替代品如 [es-toolkit](https://github.com/toss/es-toolkit)。
 
 ---
 
