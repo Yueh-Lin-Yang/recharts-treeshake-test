@@ -44,6 +44,7 @@ npm run build
 | `experiment/03b-esm-namespace-import` | ESM named export，consumer 用 `import * as api`、靜態 `api.use()` | `unuse` 成功剃除 |
 | `experiment/04a-esm-dynamic-key-variable` | 用變數當 method name：`const m = 'use'; api[m]()` | `unuse` 仍進 bundle |
 | `experiment/04b-esm-dynamic-key-runtime` | runtime 三元決定 method name：`api[cond ? 'use' : 'unuse']()` | `unuse` 仍進 bundle |
+| `experiment/05-esm-side-effect-keeps-unused` | 模組頂層常數（如 secret）與 8 種常見 side effect 寫法 | secret 明文進 bundle，side effect 寫法會保留 unused export |
 
 ---
 
@@ -152,6 +153,44 @@ api[methodName]();
 更明顯的動態存取，理所當然 bundler 兩個 key 都得保留。
 
 > 📌 **結論**：寫程式時，**所有針對「方法名」的抽象**（從 props 拿、從設定檔讀、從變數中介）都會讓 tree-shake 失效。要保留 tree-shake，就要讓 import 跟存取**全程靜態可讀**。
+
+### 實驗 05 — Side effect 與資安：bundler 不會幫你藏東西
+
+**背景**：實驗 03/04 都聚焦在「unused export 能不能被剃掉」。實驗 05 換個角度問兩件事：
+1. **什麼樣的寫法會讓 unused export 即使你用了 named export 也活下來？**（side effect）
+2. **就算只放在模組頂層的常數，會不會跑進最終 bundle？**（資安）
+
+#### 模組頂層常數一定進 bundle
+
+```ts
+// api.ts
+export function use() {
+  return `key: ${secertKey}`;
+}
+
+const secertKey = 'SECRET_MARKER_sk-live-1234567890abcdef';
+```
+
+只要 App 有 `import { use } from './api'`，這個模組就會被載入，`secertKey` 的值會以**明文**寫進 bundle。
+
+驗證方法：build 完用 `grep "SECRET_MARKER" dist/assets/*.js` 就能找到。**minify 不會加密字串**，只會混淆變數名。
+
+> 📌 **資安結論**：bundler 沒有「機密」概念。任何放在 client 端的常數——API key、JWT secret、第三方 service token——都會被使用者看到。不要把 secret 放在 client 程式碼裡，就這樣。
+
+#### 8 種會「保留 unused export」的 side effect 寫法
+
+`src/lib/api.ts` 內以註解形式列了 8 種模組頂層 side effect。任何一個取消註解後，就算 App 沒用 `unuse`，bundler 也只能保留它：
+
+1. `console.log('[api] loaded', { use, unuse })` — 日誌
+2. `(window as any).__api = { use, unuse }` — 全域變數
+3. `Array.prototype.toUseString = ...` — prototype 改動 / polyfill
+4. `import './api.css'` — 靜態資源副作用
+5. `new Map()` 等模組頂層建立物件
+6. 模組頂層立即呼叫工廠函式（缺 `/*#__PURE__*/`）
+7. 第三方 SDK 模組頂層 init（analytics、Sentry）
+8. 模組頂層 IIFE
+
+> 📌 **結論**：tree-shake 友善 = 模組頂層**只能有純宣告**（`export function`、`export const = 純運算值`）。任何「執行語句」（呼叫函式、賦值給全域、改 prototype）都會讓 bundler 變保守，把整個模組打包。
 
 ---
 
