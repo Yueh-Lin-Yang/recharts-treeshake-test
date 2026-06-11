@@ -37,10 +37,10 @@ npm run build
 
 | 主題 | 問題分支 | 問題簡述 + 結果 | 解法分支 | 解法簡述 |
 |---|---|---|---|---|
-| 01 CommonJS export | `experiment/01a-commonjs-single-file`<br>`experiment/01b-commonjs-aggregator` | CJS `module.exports = {...}` 是動態物件，bundler 無法靜態分析 → `unuse` 全洩漏 | `experiment/03a-esm-named-import` | 改用 ESM `export function` + `import { use }` |
-| 02 ESM default object | `experiment/02-esm-default-export` | `export default { use, unuse }` 仍是動態物件 → `unuse` 洩漏 | `experiment/03a-esm-named-import` | 改用 named export，不是 default 包成物件 |
-| 03 動態 key 存取 | `experiment/03a-esm-dynamic-key-variable`<br>`experiment/03b-esm-dynamic-key-runtime` | `api[m]()` 任何 key 變數化 → 所有 key 都得保留 | `experiment/03b-esm-namespace-import` | 寫死 `api.use()` 讓 key 靜態可讀 |
-| 04 Side effect 拖走 export | `experiment/04-esm-side-effect-keeps-unused` | 模組頂層執行語句引用 unused export → 連 secret 一起洩漏 | `experiment/03a-esm-named-import` | 模組頂層只放純宣告 |
+| 01 CommonJS export | `experiment/01a-commonjs-single-file`<br>`experiment/01b-commonjs-aggregator` | CJS `module.exports = {...}` 是動態物件，bundler 無法靜態分析 → `unuse` 全洩漏 | `experiment/esm-named-import` | 改用 ESM `export function` + `import { use }` |
+| 02 ESM default object | `experiment/02-esm-default-export` | `export default { use, unuse }` 仍是動態物件 → `unuse` 洩漏 | `experiment/esm-named-import` | 改用 named export，不是 default 包成物件 |
+| 03 動態 key 存取 | `experiment/03a-esm-dynamic-key-variable`<br>`experiment/03b-esm-dynamic-key-runtime` | `api[m]()` 任何 key 變數化 → 所有 key 都得保留 | `experiment/esm-namespace-import` | 寫死 `api.use()` 讓 key 靜態可讀 |
+| 04 Side effect 拖走 export | `experiment/04-esm-side-effect-keeps-unused` | 模組頂層執行語句引用 unused export → 連 secret 一起洩漏 | `experiment/esm-named-import` | 模組頂層只放純宣告 |
 | 05 CJS 套件 lodash | `experiment/05a-lodash-default-import`<br>`experiment/05b-lodash-named-import` | `lodash` 是 CJS，267 kB 整包進 bundle，換寫法救不了 | `experiment/05c-lodash-es-named-import` | 改用 `lodash-es`（ESM 重新打包），195 kB |
 | 06 Schema 寫同一檔 | `experiment/06-zod-all-in-one-file` | `z.object({...})` 在頂層被視為 side effect → 6 個 schema 全洩漏 | `experiment/06-solution-zod-one-file-per-schema` | 一檔一 schema，bundler 從檔案邊界精準切割 |
 | 07 依賴鏈幻覺 | `experiment/07-dependency-chain-illusion` | 只 import `LineChart + Line + Tooltip`，bundle 卻出現 `Rectangle` / `Cross` → 誤判 tree-shake 失敗 | （無解法，是認知陷阱） | tree-shake 正常，是 `Tooltip → Cursor → Rectangle/Cross` 依賴鏈拉的 |
@@ -51,7 +51,7 @@ npm run build
 
 ### 解法樣板 — ESM named export（後面所有「解法」都長這樣）
 
-在看每個問題之前，先認識解法的「黃金樣板」——這是 03a / 03b 兩個分支證明可行的寫法，後面 01 / 02 / 04 / 05 的解法都是回到這個樣板：
+在看每個問題之前，先認識解法的「黃金樣板」——這是 `esm-named-import` / `esm-namespace-import` 兩個分支證明可行的寫法，後面 01 / 02 / 04 / 05 的解法都是回到這個樣板：
 
 ```ts
 // api.ts
@@ -61,9 +61,9 @@ export function unuse() { ... }
 
 ```ts
 // App.tsx
-import { use } from './api';   // 03a：named import
+import { use } from './api';   // esm-named-import
 // 或
-import * as api from './api';  // 03b：namespace import + 靜態 dot access
+import * as api from './api';  // esm-namespace-import（靜態 dot access）
 api.use();
 ```
 
@@ -100,7 +100,7 @@ module.exports = {
 
 App 只 `import { use }`，但因為聚合用 `...require()` spread，bundler 連「這個聚合物件最後有哪些 key」都推不出來——只能保守地把 `use.cjs` 跟 `unuse.cjs` **整包打進去**。`unuse` 還是會在 bundle 裡。
 
-> ✅ **解法分支**：[`experiment/03a-esm-named-import`](#解法樣板--esm-named-export後面所有解法都長這樣) — 改用 ESM `export function` + named import。在 CJS 世界裡，「拆檔」不解決 tree-shake 問題，**關鍵在 export 語法是不是靜態可分析的**。
+> ✅ **解法分支**：[`experiment/esm-named-import`](#解法樣板--esm-named-export後面所有解法都長這樣) — 改用 ESM `export function` + named import。在 CJS 世界裡，「拆檔」不解決 tree-shake 問題，**關鍵在 export 語法是不是靜態可分析的**。
 
 ### 實驗 02 — 用了 ESM，但 export default 一個物件
 
@@ -119,7 +119,7 @@ api.use();
 
 App 只用 `api.use`，但因為 default 匯出的是「一整個物件」，bundler 看到的是「你 import 了這個物件」——它無法靜態分析「你只讀了物件的某個 key」。結果 `unuse` 還是會進 bundle。這跟實驗 01 的 CJS 失敗**是同一個原因**：bundler 沒辦法靜態看穿動態物件的 key 存取。
 
-> ✅ **解法分支**：[`experiment/03a-esm-named-import`](#解法樣板--esm-named-export後面所有解法都長這樣) — 改用 **named export**，不要把所有東西包成 default 物件。
+> ✅ **解法分支**：[`experiment/esm-named-import`](#解法樣板--esm-named-export後面所有解法都長這樣) — 改用 **named export**，不要把所有東西包成 default 物件。
 
 ### 實驗 03 — 動態 key 存取會破壞 tree-shake
 
@@ -143,11 +143,11 @@ api[methodName]();
 
 更明顯的動態存取，理所當然 bundler 兩個 key 都得保留。
 
-> ✅ **解法分支**：[`experiment/03b-esm-namespace-import`](#解法樣板--esm-named-export後面所有解法都長這樣) — 寫死 `api.use()`，讓存取的 key 對 bundler **全程靜態可讀**。所有針對「方法名」的抽象（從 props 拿、從設定檔讀、從變數中介）都會讓 tree-shake 失效。
+> ✅ **解法分支**：[`experiment/esm-namespace-import`](#解法樣板--esm-named-export後面所有解法都長這樣) — 寫死 `api.use()`，讓存取的 key 對 bundler **全程靜態可讀**。所有針對「方法名」的抽象（從 props 拿、從設定檔讀、從變數中介）都會讓 tree-shake 失效。
 
 ### 實驗 04 — Side effect 拖走 unused export，連 secret 一起洩漏
 
-**背景**：解法樣板（`experiment/03a-esm-named-import`）證明 ESM named export 可以正確 tree-shake——`unuse` 沒被 App 用到就會被剃掉。實驗 04 要說明的是：
+**背景**：解法樣板（`experiment/esm-named-import`）證明 ESM named export 可以正確 tree-shake——`unuse` 沒被 App 用到就會被剃掉。實驗 04 要說明的是：
 
 > **只要模組頂層有一行 side effect 引用了某個 unused export，那個 export 就會被「拖回」bundle。如果這個 export 內部又引用了 secret 常數，secret 也會跟著明文打包。**
 
@@ -203,7 +203,7 @@ import { use } from './api';  // App 只用 use
 
 > 📌 **資安結論**：bundler 沒有「機密」概念。任何放在 client 端的常數——API key、JWT secret、第三方 service token——只要有任何一條 reference 鏈從可達區（reachable code）通到它，就會以**明文**進 bundle。minify 不會加密字串，只會混淆變數名。**不要把 secret 放在 client 程式碼裡，就這樣。**
 
-> ✅ **解法分支**：[`experiment/03a-esm-named-import`](#解法樣板--esm-named-export後面所有解法都長這樣) — 模組頂層**只能放純宣告**（`export function`、`export const = 純運算值`），不要在頂層執行語句。回到解法樣板的乾淨狀態，side effect 自然不會把 unused export 拖回來。
+> ✅ **解法分支**：[`experiment/esm-named-import`](#解法樣板--esm-named-export後面所有解法都長這樣) — 模組頂層**只能放純宣告**（`export function`、`export const = 純運算值`），不要在頂層執行語句。回到解法樣板的乾淨狀態，side effect 自然不會把 unused export 拖回來。
 
 ### 實驗 05 — 真實套件 lodash：套件本身是 CJS 還是 ESM 決定一切
 
