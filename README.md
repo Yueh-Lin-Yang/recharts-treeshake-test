@@ -33,15 +33,45 @@ npm run build
 
 ## 實驗列表
 
+實驗依主題分組：相同主題的不同變體用 `01a`、`01b` 區分；不同主題之間用 `01`、`02` 區分。
+
 | Branch | 在比較什麼 | 結果（簡化版） |
 |---|---|---|
-| _尚未加入_ | | |
+| `experiment/01a-commonjs-single-file` | 一個 CJS 檔同時 export `use` 和 `unuse`，App 只用 `use` | `unuse` 仍進 bundle |
+| `experiment/01b-commonjs-aggregator` | 拆成兩個 CJS 檔，再用 `module.exports = {...require()}` 聚合 | `unuse` 仍進 bundle |
 
 ---
 
 ## 各實驗在做什麼（白話版）
 
-_尚未加入實驗。新增實驗後會在這裡用白話解釋每個實驗在問什麼問題、結論是什麼。_
+### 實驗 01 — CommonJS 為什麼沒辦法 tree-shake？
+
+**背景**：JavaScript 有兩種模組系統，**ESM**（現代）和 **CommonJS / CJS**（老的、Node.js 早期的）。CJS 的「我要 export 什麼」是執行到那一行才確定的，所以打包工具沒辦法事先看穿你「實際用了哪些」。
+
+#### 01a — 一個檔案放兩個方法
+
+```js
+// methods.cjs
+module.exports = { use, unuse };
+```
+
+App 只用 `use`，但因為 `module.exports = {...}` 是一個 runtime 物件，bundler 無法靜態判斷你沒用 `unuse`，所以**整包都進 bundle**。
+
+> 📌 **直覺反應**：「那我把它拆成兩個檔總可以了吧？」 → 看 01b。
+
+#### 01b — 拆成兩個檔，用聚合 barrel
+
+```js
+// index.cjs
+module.exports = {
+  ...require('./use.cjs'),
+  ...require('./unuse.cjs'),
+};
+```
+
+App 只 `import { use }`，但因為聚合用 `...require()` spread，bundler 連「這個聚合物件最後有哪些 key」都推不出來——只能保守地把 `use.cjs` 跟 `unuse.cjs` **整包打進去**。`unuse` 還是會在 bundle 裡。
+
+> 📌 **結論**：在 CJS 世界裡，「拆檔」不解決 tree-shake 問題，**關鍵在 export 語法是不是靜態可分析的**。要 tree-shake 友善，請改用 ESM 的 `export { use } from './use.mjs'`。
 
 ---
 
