@@ -39,11 +39,11 @@ npm run build
 |---|---|---|---|---|
 | 01 CommonJS export | `experiment/01a-commonjs-single-file`<br>`experiment/01b-commonjs-aggregator` | CJS `module.exports = {...}` 是動態物件，bundler 無法靜態分析 → `unuse` 全洩漏 | `experiment/03a-esm-named-import` | 改用 ESM `export function` + `import { use }` |
 | 02 ESM default object | `experiment/02-esm-default-export` | `export default { use, unuse }` 仍是動態物件 → `unuse` 洩漏 | `experiment/03a-esm-named-import` | 改用 named export，不是 default 包成物件 |
-| 04 動態 key 存取 | `experiment/04a-esm-dynamic-key-variable`<br>`experiment/04b-esm-dynamic-key-runtime` | `api[m]()` 任何 key 變數化 → 所有 key 都得保留 | `experiment/03b-esm-namespace-import` | 寫死 `api.use()` 讓 key 靜態可讀 |
-| 05 Side effect 拖走 export | `experiment/05-esm-side-effect-keeps-unused` | 模組頂層執行語句引用 unused export → 連 secret 一起洩漏 | `experiment/03a-esm-named-import` | 模組頂層只放純宣告 |
-| 06 CJS 套件 lodash | `experiment/06a-lodash-default-import`<br>`experiment/06b-lodash-named-import` | `lodash` 是 CJS，267 kB 整包進 bundle，換寫法救不了 | `experiment/06c-lodash-es-named-import` | 改用 `lodash-es`（ESM 重新打包），195 kB |
-| 07 Schema 寫同一檔 | `experiment/07-zod-all-in-one-file` | `z.object({...})` 在頂層被視為 side effect → 6 個 schema 全洩漏 | `experiment/07-solution-zod-one-file-per-schema` | 一檔一 schema，bundler 從檔案邊界精準切割 |
-| 08 依賴鏈幻覺 | `experiment/08-dependency-chain-illusion` | 只 import `LineChart + Line + Tooltip`，bundle 卻出現 `Rectangle` / `Cross` → 誤判 tree-shake 失敗 | （無解法，是認知陷阱） | tree-shake 正常，是 `Tooltip → Cursor → Rectangle/Cross` 依賴鏈拉的 |
+| 03 動態 key 存取 | `experiment/03a-esm-dynamic-key-variable`<br>`experiment/03b-esm-dynamic-key-runtime` | `api[m]()` 任何 key 變數化 → 所有 key 都得保留 | `experiment/03b-esm-namespace-import` | 寫死 `api.use()` 讓 key 靜態可讀 |
+| 04 Side effect 拖走 export | `experiment/04-esm-side-effect-keeps-unused` | 模組頂層執行語句引用 unused export → 連 secret 一起洩漏 | `experiment/03a-esm-named-import` | 模組頂層只放純宣告 |
+| 05 CJS 套件 lodash | `experiment/05a-lodash-default-import`<br>`experiment/05b-lodash-named-import` | `lodash` 是 CJS，267 kB 整包進 bundle，換寫法救不了 | `experiment/05c-lodash-es-named-import` | 改用 `lodash-es`（ESM 重新打包），195 kB |
+| 06 Schema 寫同一檔 | `experiment/06-zod-all-in-one-file` | `z.object({...})` 在頂層被視為 side effect → 6 個 schema 全洩漏 | `experiment/06-solution-zod-one-file-per-schema` | 一檔一 schema，bundler 從檔案邊界精準切割 |
+| 07 依賴鏈幻覺 | `experiment/07-dependency-chain-illusion` | 只 import `LineChart + Line + Tooltip`，bundle 卻出現 `Rectangle` / `Cross` → 誤判 tree-shake 失敗 | （無解法，是認知陷阱） | tree-shake 正常，是 `Tooltip → Cursor → Rectangle/Cross` 依賴鏈拉的 |
 
 ---
 
@@ -121,7 +121,7 @@ App 只用 `api.use`，但因為 default 匯出的是「一整個物件」，bun
 
 > ✅ **解法分支**：[`experiment/03a-esm-named-import`](#解法樣板--esm-named-export後面所有解法都長這樣) — 改用 **named export**，不要把所有東西包成 default 物件。
 
-### 實驗 04 — 動態 key 存取會破壞 tree-shake
+### 實驗 03 — 動態 key 存取會破壞 tree-shake
 
 **背景**：解法樣板用「靜態 dot access」（`api.use()`），如果 key 不是寫死的字串會怎樣？
 
@@ -145,9 +145,9 @@ api[methodName]();
 
 > ✅ **解法分支**：[`experiment/03b-esm-namespace-import`](#解法樣板--esm-named-export後面所有解法都長這樣) — 寫死 `api.use()`，讓存取的 key 對 bundler **全程靜態可讀**。所有針對「方法名」的抽象（從 props 拿、從設定檔讀、從變數中介）都會讓 tree-shake 失效。
 
-### 實驗 05 — Side effect 拖走 unused export，連 secret 一起洩漏
+### 實驗 04 — Side effect 拖走 unused export，連 secret 一起洩漏
 
-**背景**：實驗 03 證明 ESM named export 可以正確 tree-shake——`unuse` 沒被 App 用到就會被剃掉。實驗 05 要說明的是：
+**背景**：解法樣板（`experiment/03a-esm-named-import`）證明 ESM named export 可以正確 tree-shake——`unuse` 沒被 App 用到就會被剃掉。實驗 04 要說明的是：
 
 > **只要模組頂層有一行 side effect 引用了某個 unused export，那個 export 就會被「拖回」bundle。如果這個 export 內部又引用了 secret 常數，secret 也會跟著明文打包。**
 
@@ -205,9 +205,9 @@ import { use } from './api';  // App 只用 use
 
 > ✅ **解法分支**：[`experiment/03a-esm-named-import`](#解法樣板--esm-named-export後面所有解法都長這樣) — 模組頂層**只能放純宣告**（`export function`、`export const = 純運算值`），不要在頂層執行語句。回到解法樣板的乾淨狀態，side effect 自然不會把 unused export 拖回來。
 
-### 實驗 06 — 真實套件 lodash：套件本身是 CJS 還是 ESM 決定一切
+### 實驗 05 — 真實套件 lodash：套件本身是 CJS 還是 ESM 決定一切
 
-**背景**：實驗 01–05 都是我們自己寫的小例子。實驗 06 換成真實世界最知名的工具庫 **lodash**，看看「我只用一個 `debounce`」這個簡單需求，bundle 會差多少。
+**背景**：實驗 01–04 都是我們自己寫的小例子。實驗 05 換成真實世界最知名的工具庫 **lodash**，看看「我只用一個 `debounce`」這個簡單需求，bundle 會差多少。
 
 對照組（baseline 沒 lodash）約 **193 kB**。
 
@@ -248,11 +248,11 @@ Bundle: **195 kB**——只多了 ~2.5 kB（就是 `debounce` 本身的程式碼
 
 > 📌 **結論**：tree-shake 友善度不只取決於**你怎麼寫 import**，更取決於**這個套件本身是怎麼打包出來的**（CJS / ESM / 兩者都有）。挑套件時值得多看一眼：package.json 裡有沒有 `"module"` 或 `"exports"` 欄位指向 ESM 版本？沒有的話，再聰明的 import 寫法都救不回來。
 
-> ✅ **解法分支**：[`experiment/06c-lodash-es-named-import`](#實驗-06--真實套件-lodash套件本身是-cjs-還是-esm-決定一切) — 改用 `lodash-es`（lodash 的 ESM 重新打包版）。或更激進——換到沒有 CJS 包袱的現代替代品如 [es-toolkit](https://github.com/toss/es-toolkit)。
+> ✅ **解法分支**：[`experiment/05c-lodash-es-named-import`](#實驗-05--真實套件-lodash套件本身是-cjs-還是-esm-決定一切) — 改用 `lodash-es`（lodash 的 ESM 重新打包版）。或更激進——換到沒有 CJS 包袱的現代替代品如 [es-toolkit](https://github.com/toss/es-toolkit)。
 
-### 實驗 07 — zod：即使是 ESM 套件，「把 schema 全塞同一檔案」也會洩漏
+### 實驗 06 — zod：即使是 ESM 套件，「把 schema 全塞同一檔案」也會洩漏
 
-**背景**：實驗 06 教的是「套件格式（CJS vs ESM）決定 tree-shake 上限」。但用了 ESM 套件就一定 OK 嗎？不一定——還要看**你怎麼組織自己寫的程式碼**。
+**背景**：實驗 05 教的是「套件格式（CJS vs ESM）決定 tree-shake 上限」。但用了 ESM 套件就一定 OK 嗎？不一定——還要看**你怎麼組織自己寫的程式碼**。
 
 zod 是現代 ESM-first 的驗證庫，這個實驗用它當素材，看「把 6 個 schema 寫在同一個檔案 vs 拆成 6 個檔案」差多少。
 
@@ -277,7 +277,7 @@ import { UserSchema } from '@/schemas';  // 只用一個
 
 **結果**：bundle 約 260 kB，6 個 schema 的 marker **全部都在裡面**。
 
-為什麼？`z.object({...})` 是模組頂層的函式呼叫——bundler 無法靜態斷定它是 pure（呼應實驗 05），所以即使 `ProductSchema` 沒被 App 用到，這行 `export const ProductSchema = z.object(...)` 仍會被保留（怕 `z.object()` 有 side effect）。
+為什麼？`z.object({...})` 是模組頂層的函式呼叫——bundler 無法靜態斷定它是 pure（呼應實驗 04），所以即使 `ProductSchema` 沒被 App 用到，這行 `export const ProductSchema = z.object(...)` 仍會被保留（怕 `z.object()` 有 side effect）。
 
 #### 07-solution-zod-one-file-per-schema（解法）
 
@@ -308,24 +308,24 @@ import { UserSchema } from '@/schemas/user';  // 直接指到那個檔案
 
 > 📌 **結論**：tree-shake 的單位是**模組（檔案）**，不是 `export`。同個檔案內有任何函式呼叫，整個檔案的所有 export 都會綁在一起。Schema、constants、配置、style tokens——當你把它們塞同一檔，就等於放棄了 tree-shake 的機會。
 
-> ✅ **解法分支**：[`experiment/07-solution-zod-one-file-per-schema`](#實驗-07--zod即使是-esm-套件把-schema-全塞同一檔案也會洩漏) — 一檔一 schema，bundler 從檔案邊界精準切割。
+> ✅ **解法分支**：[`experiment/06-solution-zod-one-file-per-schema`](#實驗-06--zod即使是-esm-套件把-schema-全塞同一檔案也會洩漏) — 一檔一 schema，bundler 從檔案邊界精準切割。
 
-### 實驗 08 — 依賴鏈幻覺：看到陌生模組 ≠ tree-shake 失敗
+### 實驗 07 — 依賴鏈幻覺：看到陌生模組 ≠ tree-shake 失敗
 
-**背景**：前面 01–07 都是「真的失敗」。實驗 08 反過來，講一個**容易誤判的場景**——你看到 bundle report 出現 `Rectangle.js`、`Cross.js`，但你的程式碼裡明明只寫了 `<LineChart>` + `<Line>` + `<Tooltip>`，沒寫過 `<Bar>` 或 `Cross`。直覺反應：「tree-shake 是不是壞了？」
+**背景**：前面 01–06 都是「真的失敗」。實驗 07 反過來，講一個**容易誤判的場景**——你看到 bundle report 出現 `Rectangle.js`、`Cross.js`，但你的程式碼裡明明只寫了 `<LineChart>` + `<Line>` + `<Tooltip>`，沒寫過 `<Bar>` 或 `Cross`。直覺反應：「tree-shake 是不是壞了？」
 
 **真相**：tree-shake 正常運作。`Tooltip` 內部用了 `Cursor`，而 `Cursor` 為了支援不同圖表類型的 hover 樣式，頂層靜態 import 了 `Curve`、`Cross`、`Rectangle`、`Sector` 四種形狀——這條依賴鏈從你看不到的地方把它們拉進來。
 
 **判斷準則：對照組測試**
 - 拿掉一個你「有用」的 import（例如 `<Tooltip>`），重 build
 - 如果 bundle 變小、那些陌生模組減少 → tree-shake 在工作，它們只是依賴鏈拖進來的
-- 如果 bundle 完全不變 → 才是真的 tree-shake 失敗（回去找實驗 01–07 的形狀）
+- 如果 bundle 完全不變 → 才是真的 tree-shake 失敗（回去找實驗 01–06 的形狀）
 
 本實驗實測：移除 `<Tooltip>` 後 bundle 從 510 kB → 481 kB（−28 kB），證實依賴鏈是真實的。
 
 > 📌 **完整依賴圖與證據**：見 [DEPENDENCY_CHAIN.md](./DEPENDENCY_CHAIN.md)（含 `Tooltip → Cursor → Rectangle/Cross` 與 `LineChart → CartesianChart` 兩條鏈的原始碼追蹤）。
 
-> 📌 **跟實驗 04 的鏡像關係**：實驗 04 是「你寫動態 key，bundler 無法靜態分析」；實驗 08 是「套件內部的 runtime 分支，bundler 也無法靜態分析」。同一個原理的兩面。
+> 📌 **跟實驗 03 的鏡像關係**：實驗 03 是「你寫動態 key，bundler 無法靜態分析」；實驗 07 是「套件內部的 runtime 分支，bundler 也無法靜態分析」。同一個原理的兩面。
 
 ---
 

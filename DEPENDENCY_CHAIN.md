@@ -1,6 +1,6 @@
-# 實驗 08 — 依賴鏈幻覺：依賴圖
+# 實驗 07 — 依賴鏈幻覺：依賴圖
 
-> 對應分支：`experiment/08-dependency-chain-illusion`
+> 對應分支：`experiment/07-dependency-chain-illusion`
 > 來源：recharts 3.8.1 原始碼追蹤
 
 ---
@@ -78,9 +78,9 @@ import { Sector } from '../shape/Sector';
 
 `Cursor.js` 頂層**靜態 import** 了四種形狀。bundler 看到「Cursor 模組被用到」→ 它的所有 top-level import 都必須打包。bundler 沒辦法知道「實際 runtime 只會走其中一個 branch」——那是執行期才決定的。
 
-這跟實驗 04（動態 key）是同一個道理的鏡像：
+這跟實驗 03（動態 key）是同一個道理的鏡像：
 
-| 實驗 04 | 實驗 08 |
+| 實驗 03 | 實驗 07 |
 |---|---|
 | 你寫 `api[var]()`，runtime 才知道 key | recharts 寫 `if (chartType === 'pie') return <Sector/>`，runtime 才知道形狀 |
 | Bundler 保留所有 key 的實作 | Bundler 保留所有形狀的實作 |
@@ -100,7 +100,7 @@ import { Sector } from '../shape/Sector';
 ## 怎麼自己重現對照組
 
 ```bash
-git checkout experiment/08-dependency-chain-illusion
+git checkout experiment/07-dependency-chain-illusion
 npm install
 npm run build
 # 紀錄 bundle size
