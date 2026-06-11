@@ -1,10 +1,16 @@
+import { LineChart, Line, Tooltip } from 'recharts';
+
+const data = [
+  { x: 1, y: 10 },
+  { x: 2, y: 20 },
+  { x: 3, y: 15 },
+];
+
 export function App() {
   return (
-    <div style={{ padding: 24 }}>
-      <h1>Tree-shaking Playground</h1>
-      <p>
-        切換到 <code>experiment/*</code> branch 查看各個實驗。
-      </p>
-    </div>
+    <LineChart width={400} height={200} data={data}>
+      <Line dataKey="y" />
+      <Tooltip />
+    </LineChart>
   );
 }
