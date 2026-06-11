@@ -1,10 +1,10 @@
+import api from '@/lib/api';
+
 export function App() {
   return (
     <div style={{ padding: 24 }}>
-      <h1>Tree-shaking Playground</h1>
-      <p>
-        切換到 <code>experiment/*</code> branch 查看各個實驗。
-      </p>
+      <h1>實驗 02 — ESM export default 物件</h1>
+      <p>{api.use()}</p>
     </div>
   );
 }
