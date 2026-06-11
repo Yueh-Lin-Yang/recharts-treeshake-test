@@ -154,32 +154,46 @@ api[methodName]();
 
 > 📌 **結論**：寫程式時，**所有針對「方法名」的抽象**（從 props 拿、從設定檔讀、從變數中介）都會讓 tree-shake 失效。要保留 tree-shake，就要讓 import 跟存取**全程靜態可讀**。
 
-### 實驗 05 — Side effect 與資安：bundler 不會幫你藏東西
+### 實驗 05 — Side effect 拖走 unused export，連 secret 一起洩漏
 
-**背景**：實驗 03/04 都聚焦在「unused export 能不能被剃掉」。實驗 05 換個角度問兩件事：
-1. **什麼樣的寫法會讓 unused export 即使你用了 named export 也活下來？**（side effect）
-2. **就算只放在模組頂層的常數，會不會跑進最終 bundle？**（資安）
+**背景**：實驗 03 證明 ESM named export 可以正確 tree-shake——`unuse` 沒被 App 用到就會被剃掉。實驗 05 要說明的是：
 
-#### 模組頂層常數一定進 bundle
+> **只要模組頂層有一行 side effect 引用了某個 unused export，那個 export 就會被「拖回」bundle。如果這個 export 內部又引用了 secret 常數，secret 也會跟著明文打包。**
+
+#### 結構
 
 ```ts
 // api.ts
-export function use() {
-  return `key: ${secertKey}`;
-}
+console.log('[api] module loaded', { use, unuse });  // ← 模組頂層 side effect，引用了 unuse
 
-const secertKey = 'SECRET_MARKER_sk-live-1234567890abcdef';
+export function use() { return 'USE_METHOD_MARKER'; }
+
+const secretKey = 'SECRET_MARKER_sk-live-1234567890abcdef';
+
+export function unuse() {
+  return `UNUSE — 用到 ${secretKey}`;  // ← 只有 unuse 引用 secret
+}
 ```
 
-只要 App 有 `import { use } from './api'`，這個模組就會被載入，`secertKey` 的值會以**明文**寫進 bundle。
+```ts
+// App.tsx
+import { use } from './api';  // App 只用 use
+```
 
-驗證方法：build 完用 `grep "SECRET_MARKER" dist/assets/*.js` 就能找到。**minify 不會加密字串**，只會混淆變數名。
+#### 連鎖反應
 
-> 📌 **資安結論**：bundler 沒有「機密」概念。任何放在 client 端的常數——API key、JWT secret、第三方 service token——都會被使用者看到。不要把 secret 放在 client 程式碼裡，就這樣。
+| 環節 | 為什麼會被保留 |
+|---|---|
+| App import `use` | 整個 `api.ts` 模組被載入 |
+| 模組頂層 `console.log(..., { use, unuse })` | side effect，bundler 不敢丟，且引用了 `unuse` |
+| `unuse` 函式本體 | 被上一行引用，必須保留 |
+| `secretKey` 常數 | 被 `unuse` 引用，必須保留 |
+
+最終 bundle 同時包含 `USE_METHOD_MARKER`、`UNUSE_METHOD_MARKER`、`SECRET_MARKER`——**即使 App 從頭到尾沒用 `unuse` 也沒讀 `secretKey`**。
 
 #### 從 bundler 的視角看，哪些東西算 side effect？
 
-Bundler 會把以下類別的東西都視為「side effect」（不敢丟）：
+只要模組頂層出現以下任何一種，bundler 都會把整段保留：
 
 - **改動瀏覽器狀態**：`console.log`、`localStorage`、`history`
 - **網路請求**：`fetch`、`XMLHttpRequest`
@@ -189,9 +203,16 @@ Bundler 會把以下類別的東西都視為「side effect」（不敢丟）：
 - `throw` 或任何**可能 throw** 的 API
 - `Object.assign`（會改動目標物件）
 
-只要這些東西出現在模組頂層（無論被誰呼叫、無論引用了誰），bundler 就會把整段保留下來。
+但要區分兩件事：
+- **「side effect 必跑」**：以上任何一種，那條語句一定進 bundle
+- **「unused export 被拖回」**：只有當 side effect **明文引用了那個 export 識別符**時才會發生
 
-> 📌 **結論**：tree-shake 友善 = 模組頂層**只能有純宣告**（`export function`、`export const = 純運算值`）。任何「執行語句」——尤其上面這幾類——都會讓 bundler 變保守，把整個模組保留。
+例如 `document.title = 'loaded'` 是 side effect，但沒提到 `unuse`，所以 `unuse` 仍會被剃。
+但 `console.log({ unuse })` 既是 side effect 又引用了 `unuse`——`unuse`（連同它引用的 secret）就跑不掉了。
+
+> 📌 **資安結論**：bundler 沒有「機密」概念。任何放在 client 端的常數——API key、JWT secret、第三方 service token——只要有任何一條 reference 鏈從可達區（reachable code）通到它，就會以**明文**進 bundle。minify 不會加密字串，只會混淆變數名。**不要把 secret 放在 client 程式碼裡，就這樣。**
+
+> 📌 **tree-shake 結論**：模組頂層**只能放純宣告**（`export function`、`export const = 純運算值`）。任何「執行語句」——尤其上面這幾類——都會讓 bundler 變保守。
 
 ---
 
