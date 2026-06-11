@@ -40,6 +40,10 @@ npm run build
 | `experiment/01a-commonjs-single-file` | 一個 CJS 檔同時 export `use` 和 `unuse`，App 只用 `use` | `unuse` 仍進 bundle |
 | `experiment/01b-commonjs-aggregator` | 拆成兩個 CJS 檔，再用 `module.exports = {...require()}` 聚合 | `unuse` 仍進 bundle |
 | `experiment/02-esm-default-export` | ESM 用 `export default { use, unuse }` 匯出物件 | `unuse` 仍進 bundle |
+| `experiment/03a-esm-named-import` | ESM named export，consumer 用 `import { use }` | `unuse` 成功剃除 |
+| `experiment/03b-esm-namespace-import` | ESM named export，consumer 用 `import * as api`、靜態 `api.use()` | `unuse` 成功剃除 |
+| `experiment/04a-esm-dynamic-key-variable` | 用變數當 method name：`const m = 'use'; api[m]()` | `unuse` 仍進 bundle |
+| `experiment/04b-esm-dynamic-key-runtime` | runtime 三元決定 method name：`api[cond ? 'use' : 'unuse']()` | `unuse` 仍進 bundle |
 
 ---
 
@@ -92,6 +96,62 @@ api.use();
 App 只用 `api.use`，但因為 default 匯出的是「一整個物件」，bundler 看到的是「你 import 了這個物件」——它無法靜態分析「你只讀了物件的某個 key」。結果 `unuse` 還是會進 bundle。
 
 > 📌 **結論**：這跟實驗 01 的 CJS 失敗**是同一個原因**——bundler 沒辦法靜態看穿動態物件的 key 存取。要 tree-shake 友善，請改用 ESM 的 **named export**：`export function use() {...}; export function unuse() {...}`，App 端用 `import { use } from './api'`。
+
+### 實驗 03 — ESM named export 對照組（會成功）
+
+**背景**：前面三個實驗都失敗了，這個實驗要證明 **ESM named export** 才是真正讓 bundler 看得懂的寫法。
+
+```ts
+// api.ts
+export function use() { ... }
+export function unuse() { ... }
+```
+
+#### 03a — consumer 用具名 import
+
+```ts
+// App.tsx
+import { use } from './api';
+```
+
+bundler 一眼看出 App 只 import 了 `use`——`unuse` 整段被剃掉，連函式裡的字串都不會出現在 bundle。
+
+#### 03b — consumer 用 namespace import
+
+```ts
+// App.tsx
+import * as api from './api';
+api.use();
+```
+
+**結果跟 03a 完全一樣**——`unuse` 同樣被剃掉。
+為什麼？因為 Vite/Rollup 能追蹤「使用者透過 `api.<key>` 存取了哪些 key」，只要 key 是**靜態可讀**的（直接寫 `api.use`），bundler 就能把沒被存取的 key 連同實作一起丟掉。
+
+> 📌 **結論**：「namespace import 會把整包載進來」是個迷思。只要存取方式是靜態的，namespace import 跟 named import 在 tree-shake 上完全等價。
+
+### 實驗 04 — 動態 key 存取會破壞 tree-shake
+
+**背景**：實驗 03 證明了「靜態存取」OK。那如果 key 不是寫死的字串呢？
+
+#### 04a — 用變數當 key
+
+```ts
+const methodName = 'use';
+api[methodName]();
+```
+
+雖然 `methodName` 看起來明顯就是 `'use'`，但 bundler 為了安全**不敢做這種推論**——它只能保留所有 key 的實作。`unuse` 仍進 bundle。
+
+#### 04b — runtime 才決定 key
+
+```ts
+const methodName = Math.random() > 0.5 ? 'use' : 'unuse';
+api[methodName]();
+```
+
+更明顯的動態存取，理所當然 bundler 兩個 key 都得保留。
+
+> 📌 **結論**：寫程式時，**所有針對「方法名」的抽象**（從 props 拿、從設定檔讀、從變數中介）都會讓 tree-shake 失效。要保留 tree-shake，就要讓 import 跟存取**全程靜態可讀**。
 
 ---
 
