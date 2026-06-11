@@ -35,23 +35,42 @@ npm run build
 
 實驗依主題分組：相同主題的不同變體用 `01a`、`01b` 區分；不同主題之間用 `01`、`02` 區分。
 
-| Branch | 在比較什麼 | 結果（簡化版） |
-|---|---|---|
-| `experiment/01a-commonjs-single-file` | 一個 CJS 檔同時 export `use` 和 `unuse`，App 只用 `use` | `unuse` 仍進 bundle |
-| `experiment/01b-commonjs-aggregator` | 拆成兩個 CJS 檔，再用 `module.exports = {...require()}` 聚合 | `unuse` 仍進 bundle |
-| `experiment/02-esm-default-export` | ESM 用 `export default { use, unuse }` 匯出物件 | `unuse` 仍進 bundle |
-| `experiment/03a-esm-named-import` | ESM named export，consumer 用 `import { use }` | `unuse` 成功剃除 |
-| `experiment/03b-esm-namespace-import` | ESM named export，consumer 用 `import * as api`、靜態 `api.use()` | `unuse` 成功剃除 |
-| `experiment/04a-esm-dynamic-key-variable` | 用變數當 method name：`const m = 'use'; api[m]()` | `unuse` 仍進 bundle |
-| `experiment/04b-esm-dynamic-key-runtime` | runtime 三元決定 method name：`api[cond ? 'use' : 'unuse']()` | `unuse` 仍進 bundle |
-| `experiment/05-esm-side-effect-keeps-unused` | 模組頂層常數（如 secret）與 8 種常見 side effect 寫法 | secret 明文進 bundle，side effect 寫法會保留 unused export |
-| `experiment/06a-lodash-default-import` | 真實套件 lodash：`import _ from 'lodash'`，只用 `debounce` | 267 kB（整包進 bundle） |
-| `experiment/06b-lodash-named-import` | 同 lodash 但改 `import { debounce } from 'lodash'` | **仍 267 kB**（CJS 無解） |
-| `experiment/06c-lodash-es-named-import` | 改用 `lodash-es`（ESM 版）+ named import | **195 kB**（省 71 kB） |
+| 主題 | 問題分支 | 問題簡述 + 結果 | 解法分支 | 解法簡述 |
+|---|---|---|---|---|
+| 01 CommonJS export | `experiment/01a-commonjs-single-file`<br>`experiment/01b-commonjs-aggregator` | CJS `module.exports = {...}` 是動態物件，bundler 無法靜態分析 → `unuse` 全洩漏 | `experiment/03a-esm-named-import` | 改用 ESM `export function` + `import { use }` |
+| 02 ESM default object | `experiment/02-esm-default-export` | `export default { use, unuse }` 仍是動態物件 → `unuse` 洩漏 | `experiment/03a-esm-named-import` | 改用 named export，不是 default 包成物件 |
+| 04 動態 key 存取 | `experiment/04a-esm-dynamic-key-variable`<br>`experiment/04b-esm-dynamic-key-runtime` | `api[m]()` 任何 key 變數化 → 所有 key 都得保留 | `experiment/03b-esm-namespace-import` | 寫死 `api.use()` 讓 key 靜態可讀 |
+| 05 Side effect 拖走 export | `experiment/05-esm-side-effect-keeps-unused` | 模組頂層執行語句引用 unused export → 連 secret 一起洩漏 | `experiment/03a-esm-named-import` | 模組頂層只放純宣告 |
+| 06 CJS 套件 lodash | `experiment/06a-lodash-default-import`<br>`experiment/06b-lodash-named-import` | `lodash` 是 CJS，267 kB 整包進 bundle，換寫法救不了 | `experiment/06c-lodash-es-named-import` | 改用 `lodash-es`（ESM 重新打包），195 kB |
+| 07 Schema 寫同一檔 | `experiment/07-zod-all-in-one-file` | `z.object({...})` 在頂層被視為 side effect → 6 個 schema 全洩漏 | `experiment/07-solution-zod-one-file-per-schema` | 一檔一 schema，bundler 從檔案邊界精準切割 |
 
 ---
 
 ## 各實驗在做什麼（白話版）
+
+### 解法樣板 — ESM named export（後面所有「解法」都長這樣）
+
+在看每個問題之前，先認識解法的「黃金樣板」——這是 03a / 03b 兩個分支證明可行的寫法，後面 01 / 02 / 04 / 05 的解法都是回到這個樣板：
+
+```ts
+// api.ts
+export function use() { ... }
+export function unuse() { ... }
+```
+
+```ts
+// App.tsx
+import { use } from './api';   // 03a：named import
+// 或
+import * as api from './api';  // 03b：namespace import + 靜態 dot access
+api.use();
+```
+
+**為什麼這個樣板有效**：`export function` 是**靜態宣告**，bundler 一眼看完整個檔案就能列出所有 export 的名稱和位置。consumer 端只要用 named import 或靜態 dot access，bundler 就能精準連線哪些 export 被用到。沒被連到的 export 連同實作一起丟掉。
+
+> 📌 **常見迷思**：「namespace import (`import * as`) 會把整包載進來」——**錯**。只要存取是靜態的（`api.use()`，不是 `api[var]()`），namespace import 跟 named import 在 tree-shake 上完全等價。
+
+---
 
 ### 實驗 01 — CommonJS 為什麼沒辦法 tree-shake？
 
@@ -80,7 +99,7 @@ module.exports = {
 
 App 只 `import { use }`，但因為聚合用 `...require()` spread，bundler 連「這個聚合物件最後有哪些 key」都推不出來——只能保守地把 `use.cjs` 跟 `unuse.cjs` **整包打進去**。`unuse` 還是會在 bundle 裡。
 
-> 📌 **結論**：在 CJS 世界裡，「拆檔」不解決 tree-shake 問題，**關鍵在 export 語法是不是靜態可分析的**。要 tree-shake 友善，請改用 ESM 的 `export { use } from './use.mjs'`。
+> ✅ **解法分支**：[`experiment/03a-esm-named-import`](#解法樣板--esm-named-export後面所有解法都長這樣) — 改用 ESM `export function` + named import。在 CJS 世界裡，「拆檔」不解決 tree-shake 問題，**關鍵在 export 語法是不是靜態可分析的**。
 
 ### 實驗 02 — 用了 ESM，但 export default 一個物件
 
@@ -97,45 +116,13 @@ import api from './api';
 api.use();
 ```
 
-App 只用 `api.use`，但因為 default 匯出的是「一整個物件」，bundler 看到的是「你 import 了這個物件」——它無法靜態分析「你只讀了物件的某個 key」。結果 `unuse` 還是會進 bundle。
+App 只用 `api.use`，但因為 default 匯出的是「一整個物件」，bundler 看到的是「你 import 了這個物件」——它無法靜態分析「你只讀了物件的某個 key」。結果 `unuse` 還是會進 bundle。這跟實驗 01 的 CJS 失敗**是同一個原因**：bundler 沒辦法靜態看穿動態物件的 key 存取。
 
-> 📌 **結論**：這跟實驗 01 的 CJS 失敗**是同一個原因**——bundler 沒辦法靜態看穿動態物件的 key 存取。要 tree-shake 友善，請改用 ESM 的 **named export**：`export function use() {...}; export function unuse() {...}`，App 端用 `import { use } from './api'`。
-
-### 實驗 03 — ESM named export 對照組（會成功）
-
-**背景**：前面三個實驗都失敗了，這個實驗要證明 **ESM named export** 才是真正讓 bundler 看得懂的寫法。
-
-```ts
-// api.ts
-export function use() { ... }
-export function unuse() { ... }
-```
-
-#### 03a — consumer 用具名 import
-
-```ts
-// App.tsx
-import { use } from './api';
-```
-
-bundler 一眼看出 App 只 import 了 `use`——`unuse` 整段被剃掉，連函式裡的字串都不會出現在 bundle。
-
-#### 03b — consumer 用 namespace import
-
-```ts
-// App.tsx
-import * as api from './api';
-api.use();
-```
-
-**結果跟 03a 完全一樣**——`unuse` 同樣被剃掉。
-為什麼？因為 Vite/Rollup 能追蹤「使用者透過 `api.<key>` 存取了哪些 key」，只要 key 是**靜態可讀**的（直接寫 `api.use`），bundler 就能把沒被存取的 key 連同實作一起丟掉。
-
-> 📌 **結論**：「namespace import 會把整包載進來」是個迷思。只要存取方式是靜態的，namespace import 跟 named import 在 tree-shake 上完全等價。
+> ✅ **解法分支**：[`experiment/03a-esm-named-import`](#解法樣板--esm-named-export後面所有解法都長這樣) — 改用 **named export**，不要把所有東西包成 default 物件。
 
 ### 實驗 04 — 動態 key 存取會破壞 tree-shake
 
-**背景**：實驗 03 證明了「靜態存取」OK。那如果 key 不是寫死的字串呢？
+**背景**：解法樣板用「靜態 dot access」（`api.use()`），如果 key 不是寫死的字串會怎樣？
 
 #### 04a — 用變數當 key
 
@@ -155,7 +142,7 @@ api[methodName]();
 
 更明顯的動態存取，理所當然 bundler 兩個 key 都得保留。
 
-> 📌 **結論**：寫程式時，**所有針對「方法名」的抽象**（從 props 拿、從設定檔讀、從變數中介）都會讓 tree-shake 失效。要保留 tree-shake，就要讓 import 跟存取**全程靜態可讀**。
+> ✅ **解法分支**：[`experiment/03b-esm-namespace-import`](#解法樣板--esm-named-export後面所有解法都長這樣) — 寫死 `api.use()`，讓存取的 key 對 bundler **全程靜態可讀**。所有針對「方法名」的抽象（從 props 拿、從設定檔讀、從變數中介）都會讓 tree-shake 失效。
 
 ### 實驗 05 — Side effect 拖走 unused export，連 secret 一起洩漏
 
@@ -215,7 +202,7 @@ import { use } from './api';  // App 只用 use
 
 > 📌 **資安結論**：bundler 沒有「機密」概念。任何放在 client 端的常數——API key、JWT secret、第三方 service token——只要有任何一條 reference 鏈從可達區（reachable code）通到它，就會以**明文**進 bundle。minify 不會加密字串，只會混淆變數名。**不要把 secret 放在 client 程式碼裡，就這樣。**
 
-> 📌 **tree-shake 結論**：模組頂層**只能放純宣告**（`export function`、`export const = 純運算值`）。任何「執行語句」——尤其上面這幾類——都會讓 bundler 變保守。
+> ✅ **解法分支**：[`experiment/03a-esm-named-import`](#解法樣板--esm-named-export後面所有解法都長這樣) — 模組頂層**只能放純宣告**（`export function`、`export const = 純運算值`），不要在頂層執行語句。回到解法樣板的乾淨狀態，side effect 自然不會把 unused export 拖回來。
 
 ### 實驗 06 — 真實套件 lodash：套件本身是 CJS 還是 ESM 決定一切
 
@@ -260,7 +247,67 @@ Bundle: **195 kB**——只多了 ~2.5 kB（就是 `debounce` 本身的程式碼
 
 > 📌 **結論**：tree-shake 友善度不只取決於**你怎麼寫 import**，更取決於**這個套件本身是怎麼打包出來的**（CJS / ESM / 兩者都有）。挑套件時值得多看一眼：package.json 裡有沒有 `"module"` 或 `"exports"` 欄位指向 ESM 版本？沒有的話，再聰明的 import 寫法都救不回來。
 
-> 📌 **lodash 實務建議**：用 `lodash-es` 而不是 `lodash`。或更激進——換到沒有 CJS 包袱的現代替代品如 [es-toolkit](https://github.com/toss/es-toolkit)。
+> ✅ **解法分支**：[`experiment/06c-lodash-es-named-import`](#實驗-06--真實套件-lodash套件本身是-cjs-還是-esm-決定一切) — 改用 `lodash-es`（lodash 的 ESM 重新打包版）。或更激進——換到沒有 CJS 包袱的現代替代品如 [es-toolkit](https://github.com/toss/es-toolkit)。
+
+### 實驗 07 — zod：即使是 ESM 套件，「把 schema 全塞同一檔案」也會洩漏
+
+**背景**：實驗 06 教的是「套件格式（CJS vs ESM）決定 tree-shake 上限」。但用了 ESM 套件就一定 OK 嗎？不一定——還要看**你怎麼組織自己寫的程式碼**。
+
+zod 是現代 ESM-first 的驗證庫，這個實驗用它當素材，看「把 6 個 schema 寫在同一個檔案 vs 拆成 6 個檔案」差多少。
+
+#### 07-zod-all-in-one-file（問題）
+
+```ts
+// src/schemas.ts
+import { z } from 'zod';
+
+export const UserSchema = z.object({ ... 'USER_SCHEMA_MARKER' ... });
+export const ProductSchema = z.object({ ... 'PRODUCT_SCHEMA_MARKER' ... });
+export const OrderSchema = z.object({ ... 'ORDER_SCHEMA_MARKER' ... });
+export const PaymentSchema = z.object({ ... });
+export const AddressSchema = z.object({ ... });
+export const ShipmentSchema = z.object({ ... });
+```
+
+```ts
+// App.tsx
+import { UserSchema } from '@/schemas';  // 只用一個
+```
+
+**結果**：bundle 約 260 kB，6 個 schema 的 marker **全部都在裡面**。
+
+為什麼？`z.object({...})` 是模組頂層的函式呼叫——bundler 無法靜態斷定它是 pure（呼應實驗 05），所以即使 `ProductSchema` 沒被 App 用到，這行 `export const ProductSchema = z.object(...)` 仍會被保留（怕 `z.object()` 有 side effect）。
+
+#### 07-solution-zod-one-file-per-schema（解法）
+
+```
+src/schemas/
+  user.ts        ← export const UserSchema = z.object({...})
+  product.ts     ← export const ProductSchema = z.object({...})
+  order.ts
+  payment.ts
+  address.ts
+  shipment.ts
+```
+
+```ts
+// App.tsx
+import { UserSchema } from '@/schemas/user';  // 直接指到那個檔案
+```
+
+**結果**：bundle 約 260 kB（跟問題版幾乎一樣），但 5 個未用 schema 的 marker **全部不見了**。
+
+為什麼大小幾乎一樣？因為 zod runtime 本身（`z.string()`、`z.object()`、parse engine）就佔了主要 footprint，每個 schema 物件本身只有 ~0.1 kB。但**結構上**問題已經被解決——`product.ts` 整個檔案沒被任何人 import → bundler 安心丟掉。
+
+#### 兩層教訓
+
+1. **應用層**：「一檔多 schema」即使 ESM 也會洩漏，因為 `z.object({...})` 等於把所有 schema 物件「同時宣告 + 同時呼叫工廠函式」綁在同一個模組——bundler 只能整批保留。**一檔一 schema** 才能讓 bundler 從「檔案」這個邊界精準切割。
+
+2. **套件層**：拆檔解決應用層洩漏，但解不了**套件自己很大**的問題。zod core runtime 在那邊，就算你一個 schema 都沒寫，光 `import { z } from 'zod'` 就帶來 ~67 kB。這就是 zod v4 推出 `zod/mini` 的原因——把 runtime 切成可剃除的小單元。
+
+> 📌 **結論**：tree-shake 的單位是**模組（檔案）**，不是 `export`。同個檔案內有任何函式呼叫，整個檔案的所有 export 都會綁在一起。Schema、constants、配置、style tokens——當你把它們塞同一檔，就等於放棄了 tree-shake 的機會。
+
+> ✅ **解法分支**：[`experiment/07-solution-zod-one-file-per-schema`](#實驗-07--zod即使是-esm-套件把-schema-全塞同一檔案也會洩漏) — 一檔一 schema，bundler 從檔案邊界精準切割。
 
 ---
 
