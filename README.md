@@ -41,7 +41,7 @@ npm run build
 | 02 ESM default object | `experiment/02-esm-default-export` | `export default { use, unuse }` 仍是動態物件 → `unuse` 洩漏 | `experiment/esm-named-import` | 改用 named export，不是 default 包成物件 |
 | 03 動態 key 存取 | `experiment/03a-esm-dynamic-key-variable`<br>`experiment/03b-esm-dynamic-key-runtime` | `api[m]()` 任何 key 變數化 → 所有 key 都得保留 | `experiment/esm-namespace-import` | 寫死 `api.use()` 讓 key 靜態可讀 |
 | 04 Side effect 拖走 export | `experiment/04-esm-side-effect-keeps-unused` | 模組頂層執行語句引用 unused export → 連 secret 一起洩漏 | `experiment/esm-named-import` | 模組頂層只放純宣告 |
-| 05 CJS 套件 lodash | `experiment/05a-lodash-default-import`<br>`experiment/05b-lodash-named-import` | `lodash` 是 CJS，267 kB 整包進 bundle，換寫法救不了 | `experiment/05c-lodash-es-named-import` | 改用 `lodash-es`（ESM 重新打包），195 kB |
+| 05 CJS 套件 lodash | `experiment/05a-lodash-default-import`<br>`experiment/05b-lodash-named-import` | `lodash` 是 CJS，267 kB 整包進 bundle，換寫法救不了 | `experiment/05-solution-lodash-es-named-import` | 改用 `lodash-es`（ESM 重新打包），195 kB |
 | 06 Schema 寫同一檔 | `experiment/06-zod-all-in-one-file` | `z.object({...})` 在頂層被視為 side effect → 6 個 schema 全洩漏 | `experiment/06-solution-zod-one-file-per-schema` | 一檔一 schema，bundler 從檔案邊界精準切割 |
 | 07 依賴鏈幻覺 | `experiment/07-dependency-chain-illusion` | 只 import `LineChart + Line + Tooltip`，bundle 卻出現 `Rectangle` / `Cross` → 誤判 tree-shake 失敗 | （無解法，是認知陷阱） | tree-shake 正常，是 `Tooltip → Cursor → Rectangle/Cross` 依賴鏈拉的 |
 
@@ -248,7 +248,7 @@ Bundle: **195 kB**——只多了 ~2.5 kB（就是 `debounce` 本身的程式碼
 
 > 📌 **結論**：tree-shake 友善度不只取決於**你怎麼寫 import**，更取決於**這個套件本身是怎麼打包出來的**（CJS / ESM / 兩者都有）。挑套件時值得多看一眼：package.json 裡有沒有 `"module"` 或 `"exports"` 欄位指向 ESM 版本？沒有的話，再聰明的 import 寫法都救不回來。
 
-> ✅ **解法分支**：[`experiment/05c-lodash-es-named-import`](#實驗-05--真實套件-lodash套件本身是-cjs-還是-esm-決定一切) — 改用 `lodash-es`（lodash 的 ESM 重新打包版）。或更激進——換到沒有 CJS 包袱的現代替代品如 [es-toolkit](https://github.com/toss/es-toolkit)。
+> ✅ **解法分支**：[`experiment/05-solution-lodash-es-named-import`](#實驗-05--真實套件-lodash套件本身是-cjs-還是-esm-決定一切) — 改用 `lodash-es`（lodash 的 ESM 重新打包版）。或更激進——換到沒有 CJS 包袱的現代替代品如 [es-toolkit](https://github.com/toss/es-toolkit)。
 
 ### 實驗 06 — zod：即使是 ESM 套件，「把 schema 全塞同一檔案」也會洩漏
 
