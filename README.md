@@ -177,20 +177,21 @@ const secertKey = 'SECRET_MARKER_sk-live-1234567890abcdef';
 
 > 📌 **資安結論**：bundler 沒有「機密」概念。任何放在 client 端的常數——API key、JWT secret、第三方 service token——都會被使用者看到。不要把 secret 放在 client 程式碼裡，就這樣。
 
-#### 8 種會「保留 unused export」的 side effect 寫法
+#### 從 bundler 的視角看，哪些東西算 side effect？
 
-`src/lib/api.ts` 內以註解形式列了 8 種模組頂層 side effect。任何一個取消註解後，就算 App 沒用 `unuse`，bundler 也只能保留它：
+Bundler 會把以下類別的東西都視為「side effect」（不敢丟）：
 
-1. `console.log('[api] loaded', { use, unuse })` — 日誌
-2. `(window as any).__api = { use, unuse }` — 全域變數
-3. `Array.prototype.toUseString = ...` — prototype 改動 / polyfill
-4. `import './api.css'` — 靜態資源副作用
-5. `new Map()` 等模組頂層建立物件
-6. 模組頂層立即呼叫工廠函式（缺 `/*#__PURE__*/`）
-7. 第三方 SDK 模組頂層 init（analytics、Sentry）
-8. 模組頂層 IIFE
+- **改動瀏覽器狀態**：`console.log`、`localStorage`、`history`
+- **網路請求**：`fetch`、`XMLHttpRequest`
+- **DOM 互動**
+- **影響 event loop**：`setTimeout`、`setInterval`、`Promise`、`queueMicrotask`
+- ~~`JSON.parse`~~ / `JSON.stringify`（可能 throw error）
+- `throw` 或任何**可能 throw** 的 API
+- `Object.assign`（會改動目標物件）
 
-> 📌 **結論**：tree-shake 友善 = 模組頂層**只能有純宣告**（`export function`、`export const = 純運算值`）。任何「執行語句」（呼叫函式、賦值給全域、改 prototype）都會讓 bundler 變保守，把整個模組打包。
+只要這些東西出現在模組頂層（無論被誰呼叫、無論引用了誰），bundler 就會把整段保留下來。
+
+> 📌 **結論**：tree-shake 友善 = 模組頂層**只能有純宣告**（`export function`、`export const = 純運算值`）。任何「執行語句」——尤其上面這幾類——都會讓 bundler 變保守，把整個模組保留。
 
 ---
 
