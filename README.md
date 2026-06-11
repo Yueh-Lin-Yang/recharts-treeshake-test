@@ -39,6 +39,7 @@ npm run build
 |---|---|---|
 | `experiment/01a-commonjs-single-file` | 一個 CJS 檔同時 export `use` 和 `unuse`，App 只用 `use` | `unuse` 仍進 bundle |
 | `experiment/01b-commonjs-aggregator` | 拆成兩個 CJS 檔，再用 `module.exports = {...require()}` 聚合 | `unuse` 仍進 bundle |
+| `experiment/02-esm-default-export` | ESM 用 `export default { use, unuse }` 匯出物件 | `unuse` 仍進 bundle |
 
 ---
 
@@ -72,6 +73,25 @@ module.exports = {
 App 只 `import { use }`，但因為聚合用 `...require()` spread，bundler 連「這個聚合物件最後有哪些 key」都推不出來——只能保守地把 `use.cjs` 跟 `unuse.cjs` **整包打進去**。`unuse` 還是會在 bundle 裡。
 
 > 📌 **結論**：在 CJS 世界裡，「拆檔」不解決 tree-shake 問題，**關鍵在 export 語法是不是靜態可分析的**。要 tree-shake 友善，請改用 ESM 的 `export { use } from './use.mjs'`。
+
+### 實驗 02 — 用了 ESM，但 export default 一個物件
+
+**背景**：很多人以為「我用了現代的 ESM 寫法，tree-shake 就會自動有效」。其實不一定——關鍵不只是「用 ESM」，還要看你**怎麼 export**。
+
+```ts
+// api.ts
+export default { use, unuse };
+```
+
+```ts
+// App.tsx
+import api from './api';
+api.use();
+```
+
+App 只用 `api.use`，但因為 default 匯出的是「一整個物件」，bundler 看到的是「你 import 了這個物件」——它無法靜態分析「你只讀了物件的某個 key」。結果 `unuse` 還是會進 bundle。
+
+> 📌 **結論**：這跟實驗 01 的 CJS 失敗**是同一個原因**——bundler 沒辦法靜態看穿動態物件的 key 存取。要 tree-shake 友善，請改用 ESM 的 **named export**：`export function use() {...}; export function unuse() {...}`，App 端用 `import { use } from './api'`。
 
 ---
 
